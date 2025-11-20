@@ -18,11 +18,6 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       }
-    },
-
-    // ✅ Ajout : changer le dossier de sortie
-    build: {
-      outDir: 'www'
     }
   };
 });
