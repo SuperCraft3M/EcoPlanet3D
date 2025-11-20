@@ -1,0 +1,5 @@
+{
+  "name": "EcoPlanet 3D",
+  "description": "A 3D terraforming simulation game. Manage resources, build structures, and balance the planetary ecosystem (Air, Greenery, Wind, Earth) to make the planet habitable.",
+  "requestFramePermissions": []
+}
