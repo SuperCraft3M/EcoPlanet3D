@@ -13,9 +13,9 @@ const MONEY_MULT = 0.8;
 
 export const DIFFICULTY_CONFIG = {
   [Difficulty.EASY]: {
-    size: 10,
-    label: 'Facile (10x10)',
-    description: 'Petit terrain, progression rapide. Idéal pour débuter.',
+    size: 20,
+    label: 'Facile (20x20)',
+    description: 'Grand terrain, progression rapide. Beaucoup d\'espace pour construire et expérimenter.',
     statMultiplier: 2.0, // 2x faster
     moneyMultiplier: 1.5
   },
@@ -27,9 +27,9 @@ export const DIFFICULTY_CONFIG = {
     moneyMultiplier: 1.0
   },
   [Difficulty.HARD]: {
-    size: 20,
-    label: 'Difficile (20x20)',
-    description: 'Grand terrain, progression réaliste et lente (~3h+). La résistance augmente avec le niveau.',
+    size: 10,
+    label: 'Difficile (10x10)',
+    description: 'Petit terrain, espace très limité. Challenge stratégique intense (~3h+).',
     statMultiplier: 0.3, // Very slow
     moneyMultiplier: 0.8
   }
@@ -642,7 +642,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   [BuildingType.RAIN_COLLECTOR]: {
     type: BuildingType.RAIN_COLLECTOR,
     name: "Collecteur Pluie",
-    description: "Récolte l'eau quand il pleut.",
+    description: "Récolte l'eau quand il pleut (50L).",
     category: BuildingCategory.NATURE,
     cost: 400,
     energyConsumption: 0,
@@ -656,7 +656,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   [BuildingType.WATER_TANK]: {
     type: BuildingType.WATER_TANK,
     name: "Château d'eau",
-    description: "Stocke l'eau.",
+    description: "Stocke l'eau (200L).",
     category: BuildingCategory.NATURE,
     cost: 800,
     energyConsumption: -2,
@@ -669,7 +669,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   [BuildingType.ATMOSPHERIC_CONDENSER]: {
     type: BuildingType.ATMOSPHERIC_CONDENSER,
     name: "Condensateur",
-    description: "Génère de l'eau via l'humidité.",
+    description: "Génère de l'eau via l'humidité (10L).",
     category: BuildingCategory.NATURE,
     cost: 600,
     energyConsumption: -15,
@@ -697,7 +697,7 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   [BuildingType.LAKE]: {
     type: BuildingType.LAKE,
     name: "Lac",
-    description: "Réserve d'eau naturelle.",
+    description: "Réserve d'eau naturelle (500L).",
     category: BuildingCategory.NATURE,
     cost: 1000,
     energyConsumption: -5,
