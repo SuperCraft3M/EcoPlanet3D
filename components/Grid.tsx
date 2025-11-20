@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { GridPosition, Cell, BuildingType } from '../types';
-import { GRID_SIZE, BUILDINGS } from '../constants';
+import { BUILDINGS } from '../constants';
 import { BuildingMesh } from './BuildingMesh';
 import * as THREE from 'three';
 
@@ -15,6 +15,9 @@ interface GridProps {
 
 export const Grid: React.FC<GridProps> = ({ grid, onCellClick, hoverBuilding, animationsEnabled, isRaining }) => {
   const [hoverPos, setHoverPos] = useState<GridPosition | null>(null);
+  
+  // Derive size from the grid itself
+  const gridSize = grid.length;
 
   const getTileColor = (cell: Cell, x: number, y: number) => {
      // Check if this cell is part of the hover footprint
@@ -34,7 +37,7 @@ export const Grid: React.FC<GridProps> = ({ grid, onCellClick, hoverBuilding, an
              if (x >= hoverPos.x && x < hoverPos.x + w && y >= hoverPos.y && y < hoverPos.y + d) {
                  isHovered = true;
                  // If out of bounds or occupied, it's blocked
-                 if (hoverPos.x + w > GRID_SIZE || hoverPos.y + d > GRID_SIZE) {
+                 if (hoverPos.x + w > gridSize || hoverPos.y + d > gridSize) {
                     isBlocked = true;
                  } else {
                      // We are inside the potential placement rect.
@@ -86,7 +89,7 @@ export const Grid: React.FC<GridProps> = ({ grid, onCellClick, hoverBuilding, an
 
           // Check valid placement for color/opacity
           let isValid = true;
-          if (x + w > GRID_SIZE || y + d > GRID_SIZE) isValid = false;
+          if (x + w > gridSize || y + d > gridSize) isValid = false;
           else {
                for(let i=0; i<w; i++){
                    for(let j=0; j<d; j++){
@@ -142,7 +145,7 @@ export const Grid: React.FC<GridProps> = ({ grid, onCellClick, hoverBuilding, an
   };
 
   return (
-    <group position={[-GRID_SIZE / 2, 0, -GRID_SIZE / 2]}>
+    <group position={[-gridSize / 2, 0, -gridSize / 2]}>
       {grid.map((row, x) =>
         row.map((cell, y) => {
           const isAnchor = cell.building && cell.x === cell.refX && cell.y === cell.refY;

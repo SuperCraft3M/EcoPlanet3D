@@ -45,40 +45,6 @@ declare global {
   }
 }
 
-// Augment React's internal JSX namespace for compatibility with newer React types
-declare module 'react' {
-  namespace JSX {
-    interface IntrinsicElements {
-      group: any;
-      mesh: any;
-      primitive: any;
-      boxGeometry: any;
-      cylinderGeometry: any;
-      sphereGeometry: any;
-      coneGeometry: any;
-      dodecahedronGeometry: any;
-      octahedronGeometry: any;
-      torusGeometry: any;
-      planeGeometry: any;
-      circleGeometry: any;
-      ringGeometry: any;
-      meshStandardMaterial: any;
-      meshBasicMaterial: any;
-      meshPhongMaterial: any;
-      ambientLight: any;
-      directionalLight: any;
-      pointLight: any;
-      spotLight: any;
-      hemisphereLight: any;
-      gridHelper: any;
-      arrowHelper: any;
-      axesHelper: any;
-      color: any;
-      [elemName: string]: any;
-    }
-  }
-}
-
 export enum ResourceType {
   MONEY = 'MONEY',
   ENERGY = 'ENERGY',
@@ -90,6 +56,17 @@ export enum StatType {
   GREENERY = 'GREENERY',
   WIND = 'WIND',
   EARTH = 'EARTH',
+}
+
+export enum Difficulty {
+  EASY = 'EASY',
+  NORMAL = 'NORMAL',
+  HARD = 'HARD'
+}
+
+export enum GamePhase {
+  MENU = 'MENU',
+  PLAYING = 'PLAYING'
 }
 
 export enum BuildingCategory {
@@ -170,7 +147,8 @@ export enum BuildingType {
   CORAL_REEF = 'CORAL_REEF',
   ALGAE_FARM = 'ALGAE_FARM',
   RAIN_COLLECTOR = 'RAIN_COLLECTOR', 
-  WATER_TANK = 'WATER_TANK', // New
+  WATER_TANK = 'WATER_TANK', 
+  ATMOSPHERIC_CONDENSER = 'ATMOSPHERIC_CONDENSER',
 
   // TERRAFORM
   AIR_FILTER = 'AIR_FILTER',
@@ -236,10 +214,14 @@ export interface Cell {
 }
 
 export interface GameState {
+  gamePhase: GamePhase;
+  difficulty: Difficulty;
+  mapSize: number;
   resources: {
     money: number;
     lastIncome: number;
     energy: number;
+    energyDemand: number; // Added to track theoretical demand
     maxEnergy: number;
     water: number; 
     maxWater: number;
@@ -251,8 +233,10 @@ export interface GameState {
   tickCount: number;
   timeOfDay: number; // 0.0 to 24.0
   isRaining: boolean;
+  rainTimer: number; // New: Duration of rain remaining in ticks
   settings: {
     animations: boolean;
+    timeSpeed: number; // 1, 2, 4
   };
 }
 

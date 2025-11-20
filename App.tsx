@@ -8,27 +8,29 @@ import {
   GridPosition, 
   StatType, 
   Cell,
-  BuildingCategory
+  BuildingCategory,
+  Difficulty,
+  GamePhase
 } from './types';
 import { 
-  GRID_SIZE, 
   INITIAL_MONEY, 
   BUILDINGS, 
   TICK_RATE_MS,
-  DAY_LENGTH_TICKS
+  DAY_LENGTH_TICKS,
+  DIFFICULTY_CONFIG
 } from './constants';
 import { Grid } from './components/Grid';
 import { UIOverlay } from './components/UIOverlay';
 import { CameraController } from './components/CameraController';
 import { BuildingMesh } from './components/BuildingMesh';
 
-const SAVE_KEY = 'ECOPLANET_SAVE_V1';
+const SAVE_KEY = 'ECOPLANET_SAVE_V2'; // Incremented version for incompatible saves
 
-const createInitialGrid = (): Cell[][] => {
+const createInitialGrid = (size: number): Cell[][] => {
   const grid: Cell[][] = [];
-  for (let x = 0; x < GRID_SIZE; x++) {
+  for (let x = 0; x < size; x++) {
     const row: Cell[] = [];
-    for (let y = 0; y < GRID_SIZE; y++) {
+    for (let y = 0; y < size; y++) {
       row.push({ 
         x, y, 
         building: null, 
@@ -47,13 +49,17 @@ const createInitialGrid = (): Cell[][] => {
 
 const getInitialState = (): GameState => {
   return {
+    gamePhase: GamePhase.MENU,
+    difficulty: Difficulty.NORMAL,
+    mapSize: 15, // Default
     resources: {
       money: INITIAL_MONEY,
       lastIncome: 0,
       energy: 0,
+      energyDemand: 0,
       maxEnergy: 100,
-      water: 0,
-      maxWater: 50,
+      water: 500, // Started with 500 water
+      maxWater: 500,
       workforce: 0,
       workforceDemand: 0
     },
@@ -63,12 +69,14 @@ const getInitialState = (): GameState => {
       [StatType.WIND]: 0,
       [StatType.EARTH]: 0,
     },
-    grid: createInitialGrid(),
+    grid: [], // Empty initially, created on start
     tickCount: 0,
     timeOfDay: 8, // Start at 8 AM
     isRaining: false,
+    rainTimer: 0,
     settings: {
-        animations: true
+        animations: true,
+        timeSpeed: 1
     }
   };
 };
@@ -79,7 +87,11 @@ const App: React.FC = () => {
     try {
         const saved = localStorage.getItem(SAVE_KEY);
         if (saved) {
-            return JSON.parse(saved);
+            const parsed = JSON.parse(saved);
+            // If saved game is valid, return it
+            if (parsed.grid && parsed.grid.length > 0) {
+                 return parsed;
+            }
         }
     } catch (e) {
         console.error("Failed to load save", e);
@@ -105,6 +117,22 @@ const App: React.FC = () => {
       });
   }, []);
 
+  // --- Start Game Logic ---
+  const handleStartGame = (difficulty: Difficulty) => {
+      const config = DIFFICULTY_CONFIG[difficulty];
+      const size = config.size;
+      
+      const newState = getInitialState();
+      newState.gamePhase = GamePhase.PLAYING;
+      newState.difficulty = difficulty;
+      newState.mapSize = size;
+      newState.grid = createInitialGrid(size);
+      newState.resources.money = INITIAL_MONEY * config.moneyMultiplier;
+      
+      setGameState(newState);
+      setHasUnsavedChanges(true);
+  };
+
   // --- Save / Load / Reset Logic ---
 
   const handleSaveGame = useCallback(() => {
@@ -126,6 +154,14 @@ const App: React.FC = () => {
       setSelectedPos(null);
   }, []);
 
+  const handleToggleTimeSpeed = useCallback(() => {
+      setGameState(prev => {
+          let nextSpeed = prev.settings.timeSpeed * 2;
+          if (nextSpeed > 4) nextSpeed = 1;
+          return { ...prev, settings: { ...prev.settings, timeSpeed: nextSpeed } };
+      });
+  }, []);
+
   // Warning on tab close
   useEffect(() => {
       const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -141,15 +177,18 @@ const App: React.FC = () => {
 
   // Mark as unsaved on state change (throttled by effect dependencies)
   useEffect(() => {
-      // We don't want to trigger on initial render, but practically the game ticks immediately.
-      // Simple approach: If tickCount > 0, we assume changes happen.
-      if (gameState.tickCount > 0) {
+      if (gameState.gamePhase === GamePhase.PLAYING && gameState.tickCount > 0) {
           setHasUnsavedChanges(true);
       }
-  }, [gameState.tickCount, gameState.resources.money]); // Track significant changes
+  }, [gameState.tickCount, gameState.resources.money, gameState.gamePhase]); 
 
   // --- Game Loop ---
   useEffect(() => {
+    if (gameState.gamePhase !== GamePhase.PLAYING) return;
+
+    const speed = gameState.settings.timeSpeed || 1;
+    const delay = Math.max(50, TICK_RATE_MS / speed); // Min 50ms to prevent freeze
+
     const interval = setInterval(() => {
       setGameState((prev) => {
         // 1. Time & Weather Logic
@@ -158,34 +197,57 @@ const App: React.FC = () => {
         
         const isDay = nextTime > 6 && nextTime < 18;
         
-        // Weather chance
+        // Calculate Cloud Seeder Bonus
+        let cloudSeederCount = 0;
+        prev.grid.forEach(row => row.forEach(cell => {
+            if (cell.building === BuildingType.CLOUD_SEEDER && cell.isActive && cell.isPowered && cell.efficiency > 0 && cell.x === cell.refX && cell.y === cell.refY) {
+                cloudSeederCount++;
+            }
+        }));
+
+        // Weather chance logic
         let isRaining = prev.isRaining;
+        let rainTimer = prev.rainTimer;
+        
         if (isRaining) {
-            // If raining, 2% chance to stop per tick.
-            if (Math.random() < 0.02) isRaining = false;
+            // If timer exists, keep raining
+            if (rainTimer > 0) {
+                rainTimer--;
+            } else {
+                // Chance to stop after minimum duration
+                if (Math.random() < 0.02) isRaining = false;
+            }
         } else {
-            // If not raining, 0.5% chance to start.
-            if (Math.random() < 0.005) isRaining = true;
+            // Chance to start
+            // Base chance 0.5% + 1% per cloud seeder
+            const rainProbability = 0.005 + (cloudSeederCount * 0.01);
+            if (Math.random() < rainProbability) {
+                isRaining = true;
+                // Set duration ~30 seconds equivalent in ticks
+                // 30 ticks is approx 30 seconds at 1x speed.
+                // Since tick rate is dynamic, we use tick count.
+                rainTimer = 30 * speed; 
+            }
         }
 
         const newStats = { ...prev.stats };
         let moneyChange = 0;
         let energyProduced = 0;
-        let energyConsumed = 0;
+        let totalEnergyDemand = 0;
         let waterProduced = 0;
         let waterConsumed = 0;
         let waterStorageCapacity = 50; // Base capacity
         let totalWorkforce = 0;
-        let totalDemand = 0;
+        let totalWorkforceDemand = 0;
         
         const availableWaterStock = prev.resources.water;
+        const gridSize = prev.mapSize;
 
         const nextGrid = prev.grid.map(row => row.map(cell => ({ ...cell, pollutionCap: 100 })));
 
         // 0.5 Pass: Depollution
         prev.grid.forEach(row => {
             row.forEach(cell => {
-                // Logic only processes for the ANCHOR cell to avoid duplicates
                 if (cell.building && cell.isActive && cell.x === cell.refX && cell.y === cell.refY) {
                     const def = BUILDINGS[cell.building];
                     if (def.pollutionCapReduction && def.pollutionRadius) {
@@ -193,7 +255,7 @@ const App: React.FC = () => {
                             for(let j = -def.pollutionRadius; j <= def.pollutionRadius; j++) {
                                 const nx = cell.x + i;
                                 const ny = cell.y + j;
-                                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
                                     nextGrid[nx][ny].pollutionCap = Math.max(0, nextGrid[nx][ny].pollutionCap - def.pollutionCapReduction);
                                 }
                             }
@@ -208,32 +270,33 @@ const App: React.FC = () => {
 
         prev.grid.forEach(row => {
             row.forEach(cell => {
-                // Logic only processes for the ANCHOR cell
                 if (cell.building && cell.isActive && cell.x === cell.refX && cell.y === cell.refY) {
                     const def = BUILDINGS[cell.building];
                     
                     // Calculate Workforce
                     if (def.workersProvided) {
-                        // Logic: Humans work during day, Robots work always.
-                        // Humans need water to live/work.
                         const worksAtNight = def.isRobot;
                         const needsWater = def.waterConsumption && def.waterConsumption > 0;
                         const hasWater = availableWaterStock > 0;
 
-                        // If it's night (and not a robot) OR (needs water and has none) -> No workers
                         if ((isDay || worksAtNight) && (!needsWater || hasWater)) {
                             totalWorkforce += def.workersProvided;
                         }
                     }
 
-                    if (def.workersRequired) totalDemand += def.workersRequired;
+                    if (def.workersRequired) totalWorkforceDemand += def.workersRequired;
                     
-                    // Water generation (Rain Collectors)
                     if (def.type === BuildingType.RAIN_COLLECTOR && isRaining && def.waterGeneration) {
                         waterProduced += def.waterGeneration;
                     }
                     
-                    // Add Storage
+                    // New: Atmospheric Condenser generates water passively
+                    if (def.type === BuildingType.ATMOSPHERIC_CONDENSER && def.waterGeneration) {
+                        if (cell.isPowered) {
+                            waterProduced += def.waterGeneration;
+                        }
+                    }
+                    
                     if (def.waterStorage) {
                         waterStorageCapacity += def.waterStorage;
                     }
@@ -241,18 +304,17 @@ const App: React.FC = () => {
             });
         });
         
-        const workforceRatio = totalDemand > 0 ? Math.min(1, totalWorkforce / totalDemand) : 1;
+        const workforceRatio = totalWorkforceDemand > 0 ? Math.min(1, totalWorkforce / totalWorkforceDemand) : 1;
 
         // 2. Second Pass: Energy Production
         let tempEnergyProduced = 0;
         prev.grid.forEach(row => {
             row.forEach(cell => {
-                // Logic only processes for the ANCHOR cell
                 if (cell.building && cell.isActive && cell.x === cell.refX && cell.y === cell.refY) {
                     const def = BUILDINGS[cell.building];
                     
                     // Check Solar
-                    if (def.isSolar && !isDay) return; // No production at night
+                    if (def.isSolar && !isDay) return; 
 
                     let statEfficiency = 1;
                     if (def.minStats) {
@@ -272,13 +334,18 @@ const App: React.FC = () => {
             });
         });
 
-        // 3. Third Pass: Consumption (Energy & Water) & Active State Logic
+        // 3. Third Pass: Consumption & Active State Logic
+        // Calculate Total Theoretical Demand first
+        let potentialEnergyDemand = 0;
         let tempWaterConsumed = 0;
+        
         prev.grid.forEach(row => {
             row.forEach(cell => {
-                // Logic only processes for the ANCHOR cell
                 if (cell.building && cell.isActive && cell.x === cell.refX && cell.y === cell.refY) {
                     const def = BUILDINGS[cell.building];
+                    if (def.energyConsumption < 0) {
+                        potentialEnergyDemand += Math.abs(def.energyConsumption);
+                    }
                     if (def.waterConsumption) tempWaterConsumed += def.waterConsumption;
                 }
             });
@@ -287,27 +354,19 @@ const App: React.FC = () => {
         // Check Stocks
         const availableWater = prev.resources.water + waterProduced;
         const waterRatio = tempWaterConsumed > 0 ? Math.min(1, availableWater / tempWaterConsumed) : 1;
-
-        let tempEnergyConsumption = 0;
-        prev.grid.forEach(row => {
-            row.forEach(cell => {
-                 // Logic only processes for the ANCHOR cell
-                 if (cell.building && cell.isActive && cell.x === cell.refX && cell.y === cell.refY) {
-                    if (BUILDINGS[cell.building].energyConsumption < 0) {
-                        tempEnergyConsumption += Math.abs(BUILDINGS[cell.building].energyConsumption);
-                    }
-                }
-            });
-        });
         
-        const gridHasPower = tempEnergyProduced >= tempEnergyConsumption;
+        // Determine Power Grid State
+        const gridHasPower = tempEnergyProduced >= potentialEnergyDemand;
+
+        // Difficulty Multiplier for Stats
+        const diffConfig = DIFFICULTY_CONFIG[prev.difficulty];
+        const statMultiplier = diffConfig.statMultiplier;
 
         // Iterate Grid for Effects
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            for (let y = 0; y < gridSize; y++) {
                 const cell = nextGrid[x][y];
                 
-                // Only process ANCHOR logic for output, but we need to update status for ALL cells
                 const isAnchor = cell.building && cell.x === cell.refX && cell.y === cell.refY;
                 
                 let newPollution = Math.max(0, cell.pollution - 1);
@@ -342,12 +401,12 @@ const App: React.FC = () => {
                             }
                         } else {
                             // Consumer
+                            if (isAnchor) totalEnergyDemand += Math.abs(def.energyConsumption);
+
                             if (!gridHasPower && def.energyConsumption < 0) {
                                 isPowered = false;
                                 efficiency = 0;
                             } else {
-                                if (isAnchor) energyConsumed += Math.abs(def.energyConsumption);
-                                
                                 // Calculate Efficiency based on needs
                                 if (def.workersRequired) {
                                     efficiency *= workforceRatio;
@@ -376,7 +435,28 @@ const App: React.FC = () => {
                             moneyChange += (def.resourceGeneration * efficiency);
                         }
                         Object.entries(def.effects).forEach(([stat, val]) => {
-                            if (val) newStats[stat as StatType] = Math.min(100, Math.max(0, newStats[stat as StatType] + ((val as number) * efficiency)));
+                            if (val) {
+                                const sType = stat as StatType;
+                                const currentVal = newStats[sType];
+                                
+                                // --- DIMINISHING RETURNS LOGIC ---
+                                // As currentVal approaches 100 (or higher), gains are reduced.
+                                // Formula: Gain * Multiplier * (1 - (current / 120))
+                                // At 0 stat: 100% gain.
+                                // At 60 stat: 50% gain.
+                                // At 100 stat: 16% gain.
+                                // This makes it much harder to max out stats.
+                                const diminishingFactor = Math.max(0.1, 1 - (currentVal / 150));
+                                
+                                let change = (val as number) * efficiency * statMultiplier;
+                                
+                                // Only diminish positive gains
+                                if (change > 0) {
+                                    change *= diminishingFactor;
+                                }
+
+                                newStats[sType] = Math.max(0, currentVal + change);
+                            }
                         });
                     }
                 }
@@ -387,10 +467,9 @@ const App: React.FC = () => {
         }
 
         // 4. Spatial Pollution
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            for (let y = 0; y < gridSize; y++) {
                 const cell = nextGrid[x][y];
-                 // Only anchor radiates pollution
                  if (cell.building && cell.x === cell.refX && cell.y === cell.refY && cell.isActive && cell.isPowered && cell.efficiency > 0) {
                      const def = BUILDINGS[cell.building];
                      if (def.pollutionAmount && def.pollutionRadius) {
@@ -398,7 +477,7 @@ const App: React.FC = () => {
                             for(let j = -def.pollutionRadius; j <= def.pollutionRadius; j++) {
                                 const nx = x + i;
                                 const ny = y + j;
-                                if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
                                     nextGrid[nx][ny].pollution += (def.pollutionAmount * cell.efficiency);
                                 }
                             }
@@ -409,14 +488,13 @@ const App: React.FC = () => {
         }
 
         // 5. Clamp & Water Logic
-        for (let x = 0; x < GRID_SIZE; x++) {
-            for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            for (let y = 0; y < gridSize; y++) {
                 nextGrid[x][y].pollution = Math.min(nextGrid[x][y].pollutionCap, nextGrid[x][y].pollution);
             }
         }
         
         const netWater = waterProduced - waterConsumed;
-        // Apply maxWater capacity
         const newWaterStock = Math.max(0, Math.min(waterStorageCapacity, prev.resources.water + netWater));
 
         return {
@@ -424,50 +502,53 @@ const App: React.FC = () => {
           resources: {
             money: prev.resources.money + moneyChange,
             lastIncome: moneyChange,
-            energy: energyProduced - energyConsumed,
+            energy: energyProduced - totalEnergyDemand, // Shows negative if deficit
+            energyDemand: totalEnergyDemand,
             maxEnergy: energyProduced,
             water: newWaterStock,
             maxWater: waterStorageCapacity,
             workforce: totalWorkforce,
-            workforceDemand: totalDemand
+            workforceDemand: totalWorkforceDemand
           },
           stats: newStats,
           grid: nextGrid,
           tickCount: prev.tickCount + 1,
           timeOfDay: nextTime,
-          isRaining: isRaining
+          isRaining: isRaining,
+          rainTimer: rainTimer
         };
       });
-    }, TICK_RATE_MS);
+    }, delay);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [gameState.settings.timeSpeed, gameState.gamePhase, gameState.difficulty]);
 
   // --- Interaction ---
   const handleCellClick = useCallback((pos: GridPosition) => {
+    if (gameState.gamePhase !== GamePhase.PLAYING) return;
+
     setGameState(prev => {
+        const gridSize = prev.mapSize;
         const cell = prev.grid[pos.x][pos.y];
         
         // --- DESTRUCTION LOGIC ---
         if (selectedBuilding === BuildingType.BULLDOZER) {
             if (cell.building) {
-                 // If clicking a secondary cell, find anchor
                  const anchorX = cell.refX !== undefined ? cell.refX : pos.x;
                  const anchorY = cell.refY !== undefined ? cell.refY : pos.y;
                  
                  const anchorCell = prev.grid[anchorX][anchorY];
-                 if (!anchorCell.building) return prev; // Should not happen
+                 if (!anchorCell.building) return prev; 
 
                  const def = BUILDINGS[anchorCell.building];
                  const refund = Math.floor(def.cost * 0.5);
                  
                  const newGrid = prev.grid.map(row => row.map(c => ({ ...c })));
                  
-                 // Clear entire footprint
                  const [width, depth] = def.size;
                  for(let i=0; i<width; i++) {
                      for(let j=0; j<depth; j++) {
-                         if (anchorX + i < GRID_SIZE && anchorY + j < GRID_SIZE) {
+                         if (anchorX + i < gridSize && anchorY + j < gridSize) {
                              newGrid[anchorX + i][anchorY + j] = {
                                  ...newGrid[anchorX + i][anchorY + j],
                                  building: null,
@@ -491,10 +572,8 @@ const App: React.FC = () => {
             return prev;
         }
 
-        // --- SELECTION LOGIC ---
         if (selectedBuilding === BuildingType.NONE) {
             if (cell.building) {
-                // Select the anchor
                 const anchorX = cell.refX !== undefined ? cell.refX : pos.x;
                 const anchorY = cell.refY !== undefined ? cell.refY : pos.y;
                 setSelectedPos({ x: anchorX, y: anchorY });
@@ -503,7 +582,6 @@ const App: React.FC = () => {
             return prev;
         }
 
-        // If clicking a building with a building selected -> Select it instead of placing
         if (cell.building) {
              const anchorX = cell.refX !== undefined ? cell.refX : pos.x;
              const anchorY = cell.refY !== undefined ? cell.refY : pos.y;
@@ -512,21 +590,16 @@ const App: React.FC = () => {
              return prev;
         }
 
-        // --- PLACEMENT LOGIC ---
         const buildingDef = BUILDINGS[selectedBuilding];
         const [width, depth] = buildingDef.size;
 
-        // Check Bounds
-        if (pos.x + width > GRID_SIZE || pos.y + depth > GRID_SIZE) {
-            // Out of bounds
+        if (pos.x + width > gridSize || pos.y + depth > gridSize) {
             return prev;
         }
 
-        // Check Collisions
         for(let i=0; i<width; i++) {
             for(let j=0; j<depth; j++) {
                 if (prev.grid[pos.x + i][pos.y + j].building !== null) {
-                    // Occupied
                     return prev;
                 }
             }
@@ -535,13 +608,12 @@ const App: React.FC = () => {
         if (prev.resources.money >= buildingDef.cost) {
             const newGrid = prev.grid.map(row => row.map(c => ({ ...c })));
             
-            // Fill footprint
             for(let i=0; i<width; i++) {
                 for(let j=0; j<depth; j++) {
                     newGrid[pos.x + i][pos.y + j] = {
                         ...newGrid[pos.x + i][pos.y + j],
                         building: selectedBuilding,
-                        refX: pos.x, // Anchor is the top-left clicked position
+                        refX: pos.x,
                         refY: pos.y,
                         isActive: true,
                         isPowered: true,
@@ -559,13 +631,13 @@ const App: React.FC = () => {
         }
         return prev;
     });
-  }, [selectedBuilding]);
+  }, [selectedBuilding, gameState.gamePhase]);
 
   const toggleBuildingActive = () => {
       if (!selectedPos) return;
       setGameState(prev => {
-          // Toggle anchor
           const newGrid = prev.grid.map(row => row.map(c => ({ ...c })));
+          const gridSize = prev.mapSize;
           const isActive = !newGrid[selectedPos.x][selectedPos.y].isActive;
           
           const cell = newGrid[selectedPos.x][selectedPos.y];
@@ -575,7 +647,9 @@ const App: React.FC = () => {
               
               for(let i=0; i<width; i++) {
                 for(let j=0; j<depth; j++) {
-                     newGrid[selectedPos.x + i][selectedPos.y + j].isActive = isActive;
+                     if (selectedPos.x + i < gridSize && selectedPos.y + j < gridSize) {
+                         newGrid[selectedPos.x + i][selectedPos.y + j].isActive = isActive;
+                     }
                 }
               }
           }
@@ -588,6 +662,7 @@ const App: React.FC = () => {
       if (!selectedPos) return;
        setGameState(prev => {
            const cell = prev.grid[selectedPos.x][selectedPos.y];
+           const gridSize = prev.mapSize;
            if (!cell.building) return prev;
            const def = BUILDINGS[cell.building];
            const refund = Math.floor(def.cost * 0.5);
@@ -597,7 +672,7 @@ const App: React.FC = () => {
            const [width, depth] = def.size;
              for(let i=0; i<width; i++) {
                  for(let j=0; j<depth; j++) {
-                     if (selectedPos.x + i < GRID_SIZE && selectedPos.y + j < GRID_SIZE) {
+                     if (selectedPos.x + i < gridSize && selectedPos.y + j < gridSize) {
                          newGrid[selectedPos.x + i][selectedPos.y + j] = {
                              ...newGrid[selectedPos.x + i][selectedPos.y + j],
                              building: null,
@@ -617,7 +692,6 @@ const App: React.FC = () => {
       setGameState(prev => ({ ...prev, settings: { ...prev.settings, animations: !prev.settings.animations } }));
   };
 
-  // Environment Parameters Helpers
   const isDay = gameState.timeOfDay > 6 && gameState.timeOfDay < 18;
   
   const bgDay = '#87CEEB'; 
@@ -632,6 +706,10 @@ const App: React.FC = () => {
   const timeRatio = gameState.timeOfDay / 24;
   const sunX = Math.sin(timeRatio * Math.PI * 2) * 50;
   const sunY = Math.cos(timeRatio * Math.PI * 2) * 50;
+
+  // Calculate Camera Zoom/Position based on Map Size
+  const mapSize = gameState.mapSize || 15;
+  const camDistance = mapSize * 2.5;
 
   return (
     <div ref={mainContainerRef} className="w-full h-screen bg-black overflow-hidden relative select-none" tabIndex={0}>
@@ -671,29 +749,29 @@ const App: React.FC = () => {
                 color={isDay ? lightDay : lightNight}
             />
 
-            <Grid 
-                grid={gameState.grid} 
-                onCellClick={handleCellClick} 
-                hoverBuilding={selectedBuilding} 
-                animationsEnabled={gameState.settings.animations}
-                isRaining={gameState.isRaining}
-            />
+            {gameState.gamePhase === GamePhase.PLAYING && (
+                <Grid 
+                    grid={gameState.grid} 
+                    onCellClick={handleCellClick} 
+                    hoverBuilding={selectedBuilding} 
+                    animationsEnabled={gameState.settings.animations}
+                    isRaining={gameState.isRaining}
+                />
+            )}
 
             <OrbitControls 
                 maxPolarAngle={Math.PI / 2.2} 
                 minDistance={10} 
-                maxDistance={80} 
+                maxDistance={camDistance + 40} 
                 enablePan={false} 
                 makeDefault
             />
         </View>
 
-        {/* Menu Item Previews */}
+        {/* Render Menu Previews */}
         {Object.entries(previewRefs).map(([type, ref]) => (
             <View track={{ current: ref }} key={type}>
                 <PerspectiveCamera makeDefault position={[2.5, 2, 2.5]} fov={40} />
-                
-                {/* Studio Lighting for Previews */}
                 <ambientLight intensity={0.8} />
                 <directionalLight position={[5, 5, 5]} intensity={1.5} color="#ffffff" />
                 <pointLight position={[-5, 2, -5]} intensity={0.8} color="#93c5fd" />
@@ -732,6 +810,8 @@ const App: React.FC = () => {
         onSaveGame={handleSaveGame}
         onResetGame={handleResetGame}
         hasUnsavedChanges={hasUnsavedChanges}
+        onToggleTimeSpeed={handleToggleTimeSpeed}
+        onStartGame={handleStartGame}
       />
 
     </div>

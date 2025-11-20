@@ -1,13 +1,39 @@
 
-import { BuildingType, BuildingDef, StatType, BuildingCategory } from './types';
+import { BuildingType, BuildingDef, StatType, BuildingCategory, Difficulty } from './types';
 
-export const GRID_SIZE = 25; 
+// Removed fixed GRID_SIZE, now controlled by Difficulty
 export const TICK_RATE_MS = 1000;
 export const WINNING_SCORE = 100;
 export const DAY_LENGTH_TICKS = 300; // 5 minutes per day
 
-export const STAT_MULT = 0.001; 
+// Reduced multiplier to extend gameplay time significantly
+// With diminishing returns, this base value is key.
+export const STAT_MULT = 0.0002; 
 const MONEY_MULT = 0.8;
+
+export const DIFFICULTY_CONFIG = {
+  [Difficulty.EASY]: {
+    size: 10,
+    label: 'Facile (10x10)',
+    description: 'Petit terrain, progression rapide. Idéal pour débuter.',
+    statMultiplier: 2.0, // 2x faster
+    moneyMultiplier: 1.5
+  },
+  [Difficulty.NORMAL]: {
+    size: 15,
+    label: 'Normal (15x15)',
+    description: 'Terrain moyen, progression équilibrée.',
+    statMultiplier: 1.0,
+    moneyMultiplier: 1.0
+  },
+  [Difficulty.HARD]: {
+    size: 20,
+    label: 'Difficile (20x20)',
+    description: 'Grand terrain, progression réaliste et lente (~3h+). La résistance augmente avec le niveau.',
+    statMultiplier: 0.3, // Very slow
+    moneyMultiplier: 0.8
+  }
+};
 
 export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   [BuildingType.NONE]: {
@@ -640,6 +666,20 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
     scale: [0.8, 1.5, 0.8],
     size: [1, 1]
   },
+  [BuildingType.ATMOSPHERIC_CONDENSER]: {
+    type: BuildingType.ATMOSPHERIC_CONDENSER,
+    name: "Condensateur",
+    description: "Génère de l'eau via l'humidité.",
+    category: BuildingCategory.NATURE,
+    cost: 600,
+    energyConsumption: -15,
+    waterGeneration: 2, // Passive generation
+    waterStorage: 10,
+    effects: {},
+    color: "#7dd3fc",
+    scale: [0.9, 1.2, 0.9],
+    size: [1, 1]
+  },
   [BuildingType.PARK]: {
     type: BuildingType.PARK,
     name: "Parc Public",
@@ -722,11 +762,11 @@ export const BUILDINGS: Record<BuildingType, BuildingDef> = {
   [BuildingType.CLOUD_SEEDER]: {
     type: BuildingType.CLOUD_SEEDER,
     name: "Ensemenceur",
-    description: "Favorise la pluie.",
+    description: "Augmente grandement les chances de pluie.",
     category: BuildingCategory.TERRAFORM,
     cost: 1500,
     energyConsumption: -50,
-    effects: { [StatType.GREENERY]: 10 * STAT_MULT, [StatType.WIND]: 5 * STAT_MULT },
+    effects: { [StatType.GREENERY]: 5 * STAT_MULT, [StatType.WIND]: 2 * STAT_MULT },
     color: "#f0f8ff",
     scale: [1, 3, 1],
     size: [2, 2]
