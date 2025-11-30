@@ -37,7 +37,7 @@ Pour exécuter le projet sur une machine locale à des fins de développement ou
 
 1.  **Cloner le dépôt**
     ```bash
-    git clone [https://github.com/SuperCraft3M/EcoPlanet3D.git](https://github.com/SuperCraft3M/EcoPlanet3D.git)
+    git clone https://github.com/SuperCraft3M/EcoPlanet3D.git
     cd EcoPlanet3D
     ```
 
